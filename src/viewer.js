@@ -18,6 +18,18 @@ import {
   Vector3,
   WebGLRenderer,
   sRGBEncoding,
+  Line,
+  BufferGeometry,
+  BufferAttribute,
+  Mesh,
+  Group,
+  TextureLoader,
+  CylinderGeometry,
+  MeshBasicMaterial,
+  AdditiveBlending,
+  DoubleSide,
+  PlaneGeometry,
+  DynamicDrawUsage,
 } from 'three';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -27,6 +39,8 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import { VRButton } from 'three/examples/jsm/webxr/VRButton.js';
+import { XRControllerModelFactory } from 'three/examples/jsm/webxr/XRControllerModelFactory';
+import { MeshLine, MeshLineMaterial } from 'three.meshline';
 
 import { GUI } from 'dat.gui';
 
@@ -119,7 +133,10 @@ export class Viewer {
       1000
     );
     this.activeCamera = this.defaultCamera;
-    this.scene.add(this.defaultCamera);
+    this.cameraGroup = new Group();
+    this.cameraGroup.add(this.defaultCamera);
+    this.cameraGroup.position.set(0, 0, 0);
+    this.scene.add(this.cameraGroup);
 
     this.renderer = window.renderer = new WebGLRenderer({ antialias: true });
     this.renderer.physicallyCorrectLights = true;
@@ -163,6 +180,33 @@ export class Viewer {
     this.addGUI();
     if (options.kiosk) this.gui.close();
 
+    // VR Headset Controller
+    this.controllerModelFactory = new XRControllerModelFactory();
+    this.controllerGeometry = new BufferGeometry().setFromPoints([
+      new Vector3(0, 0, 0),
+      new Vector3(0, 0, -1),
+    ]);
+    // this.controllerLine = new Line(this.controllerGeometry);
+    // this.controllerLine.name = 'Controller Line';
+    // this.controllerLine.scale.z = 5;
+    this.controller0 = this.addController(0);
+    this.controller1 = this.addController(1);
+    this.targetY = -3.0;
+
+    this.guidingController = null;
+
+    this.guidesLineGeometryVertices = null;
+    this.guidesLineSegments = 30;
+    this.guidesGuideline = null;
+    this.guidesGuidesprite = null;
+    this.guidesMeshLine = null;
+    this.tempVec = new Vector3();
+    this.tempVec1 = new Vector3();
+    this.tempVecP = new Vector3();
+    this.tempVecV = new Vector3();
+    this.g = new Vector3(0, -9.8, 0);
+    this.setGuidesline();
+
     this.animate = this.animate.bind(this);
     // requestAnimationFrame(this.animate);
     this.renderer.setAnimationLoop(this.animate);
@@ -181,6 +225,53 @@ export class Viewer {
     this.controls.update();
     this.stats.update();
     this.mixer && this.mixer.update(dt);
+
+    // guides
+    if (this.guidingController) {
+      const p = this.guidingController.getWorldPosition(this.tempVecP);
+      const v = this.guidingController.getWorldDirection(this.tempVecV);
+      console.log('Animate');
+      console.log(p);
+      console.log(v);
+      console.log(this.targetY);
+      v.multiplyScalar(6);
+      const t =
+        (-v.y + Math.sqrt(v.y ** 2 + 2 * this.g.y * (this.targetY - p.y))) /
+        this.g.y;
+      const vertex = this.tempVec.set(0, 0, 0);
+
+      let lineGeometryVertices =
+        this.guidesGuideline.geometry.attributes.position.array;
+
+      for (let i = 1; i <= this.guidesLineSegments; i++) {
+        this.positionAtT(
+          vertex,
+          (i * t) / this.guidesLineSegments,
+          p,
+          v,
+          this.g
+        );
+        this.guidingController.worldToLocal(vertex);
+        vertex.toArray(this.guidesLineGeometryVertices, i * 3);
+      }
+
+      lineGeometryVertices = lineGeometryVertices.slice(
+        0,
+        (this.guidesLineSegments + 1) * 3
+      );
+      this.guidesGuideline.geometry.setAttribute(
+        'position',
+        new BufferAttribute(this.guidesLineGeometryVertices, 3).setUsage(
+          DynamicDrawUsage
+        )
+      );
+      this.guidesMeshLine.setGeometry(this.guidesGuideline.geometry);
+      this.guidesGuideline.geometry.attributes.position.needsUpdate = true;
+
+      this.positionAtT(this.guidesGuidesprite.position, t * 0.98, p, v, this.g);
+      this.guidesGuidesprite.position.y = 0;
+    }
+
     this.render();
 
     this.prevTime = time;
@@ -189,7 +280,7 @@ export class Viewer {
   render() {
     this.renderer.render(this.scene, this.activeCamera);
     if (this.state.grid) {
-      this.axesCamera.position.copy(this.defaultCamera.position);
+      this.axesCamera.position.copy(this.cameraGroup.position);
       this.axesCamera.lookAt(this.axesScene.position);
       this.axesRenderer.render(this.axesScene, this.axesCamera);
     }
@@ -260,6 +351,8 @@ export class Viewer {
             );
           }
 
+          scene.scale.set(0.001, 0.001, 0.001);
+
           this.setContent(scene, clips);
 
           blobURLs.forEach(URL.revokeObjectURL);
@@ -297,19 +390,19 @@ export class Viewer {
     this.defaultCamera.updateProjectionMatrix();
 
     if (this.options.cameraPosition) {
-      this.defaultCamera.position.fromArray(this.options.cameraPosition);
+      this.cameraGroup.position.fromArray(this.options.cameraPosition);
       this.defaultCamera.lookAt(new Vector3());
     } else {
-      this.defaultCamera.position.copy(center);
-      this.defaultCamera.position.x += size / 2.0;
-      this.defaultCamera.position.y += size / 5.0;
-      this.defaultCamera.position.z += size / 2.0;
+      this.cameraGroup.position.copy(center);
+      this.cameraGroup.position.x += size / 2.0;
+      this.cameraGroup.position.y += size / 5.0;
+      this.cameraGroup.position.z += size / 2.0;
       this.defaultCamera.lookAt(center);
     }
 
     this.setCamera(DEFAULT_CAMERA);
 
-    this.axesCamera.position.copy(this.defaultCamera.position);
+    this.axesCamera.position.copy(this.cameraGroup.position);
     this.axesCamera.lookAt(this.axesScene.position);
     this.axesCamera.near = size / 100;
     this.axesCamera.far = size * 100;
@@ -746,6 +839,133 @@ export class Viewer {
         this.animCtrls.push(ctrl);
       });
     }
+  }
+
+  addController(index) {
+    const controller = this.renderer.xr.getController(index);
+    controller.addEventListener('selectstart', (event) => {
+      if (index === 0) {
+        this.guidingController = this.controller0;
+        this.controller0.add(this.guidesGuideline);
+        this.cameraGroup.add(this.guidesGuidesprite);
+        // this.scene.add(this.guidesGuidesprite);
+        this.targetY = -2.9;
+      } else {
+        this.guidingController = this.controller1;
+        this.controller1.add(this.guidesGuideline);
+        this.cameraGroup.add(this.guidesGuidesprite);
+        // this.scene.add(this.guidesGuidesprite);
+        this.targetY = -0.3;
+      }
+    });
+
+    controller.addEventListener('selectend', (event) => {
+      const feetPos = this.renderer.xr
+        .getCamera(this.activeCamera.camera)
+        .getWorldPosition(this.tempVec);
+      feetPos.y = 0;
+
+      const p = this.guidingController.getWorldPosition(this.tempVecP);
+      const v = this.guidingController.getWorldDirection(this.tempVecV);
+      v.multiplyScalar(6);
+      const t =
+        (-v.y + Math.sqrt(v.y ** 2 + 2 * this.g.y * (this.targetY - p.y))) /
+        this.g.y;
+      const cursorPos = this.positionAtT(this.tempVec1, t, p, v, this.g);
+
+      const offset = cursorPos.addScaledVector(feetPos, -1);
+      console.log(this.cameraGroup.position);
+      this.cameraGroup.position.add(offset); // locomotion
+      console.log(this.cameraGroup.position);
+
+      this.guidingController.remove(this.guidesGuideline);
+      this.cameraGroup.remove(this.guidesGuidesprite);
+      this.guidingController = null;
+
+      this.cameraGroup.position.y = this.targetY; // 1F:-3, 2F:-0.5
+      console.log(this.cameraGroup.position);
+
+      // console.log(this.cameraGroup.position);
+      // console.log(this.defaultCamera.position);
+      // console.log(feetPos);
+    });
+
+    this.cameraGroup.add(controller);
+    // this.scene.add(controller);
+
+    const controllerGrip = this.renderer.xr.getControllerGrip(index);
+    controllerGrip.add(
+      this.controllerModelFactory.createControllerModel(controllerGrip)
+    );
+    this.cameraGroup.add(controllerGrip);
+    // this.scene.add(controllerGrip);
+
+    // controller.add(this.controllerLine.clone());
+    return controller;
+  }
+
+  setGuidesline() {
+    this.guidesLineGeometryVertices = new Float32Array(
+      (this.guidesLineSegments + 1) * 3
+    );
+    this.guidesLineGeometryVertices.fill(0);
+
+    const lineGeometry = new BufferGeometry();
+    lineGeometry.setAttribute(
+      'position',
+      new BufferAttribute(this.guidesLineGeometryVertices, 3).setUsage(
+        DynamicDrawUsage
+      )
+    );
+
+    this.guidesMeshLine = new MeshLine();
+    this.guidesMeshLine.setGeometry(lineGeometry);
+    const lineMaterial = new MeshLineMaterial({
+      lineWidth: 0.005,
+    });
+
+    this.guidesGuideline = new Mesh(this.guidesMeshLine.geometry, lineMaterial);
+    this.scene.add(this.guidesGuideline);
+
+    this.guidesGuidesprite = new Group();
+    let texture = new TextureLoader().load('./img/pillar.png');
+    let geometry = new CylinderGeometry(0.09, 0.09, 0.1, 20, 20, true);
+    let material = new MeshBasicMaterial({
+      map: texture,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.45,
+      blending: AdditiveBlending,
+      side: DoubleSide,
+      depthWrite: false,
+    });
+    const pillar = new Mesh(geometry, material);
+    pillar.position.y = 0.075;
+    this.guidesGuidesprite.add(pillar);
+
+    texture = new TextureLoader().load('./img/ground.png');
+    geometry = new PlaneGeometry(0.3, 0.3, 16, 16);
+    material = new MeshBasicMaterial({
+      map: texture,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.8,
+      blending: AdditiveBlending,
+      side: DoubleSide,
+    });
+
+    const ground = new Mesh(geometry, material);
+    ground.scale.multiplyScalar(1.1);
+    ground.rotation.x = Math.PI / 2;
+    ground.position.y = 0.01;
+    this.guidesGuidesprite.add(ground);
+  }
+
+  positionAtT(inVec, t, p, v, g) {
+    inVec.copy(p);
+    inVec.addScaledVector(v, t);
+    inVec.addScaledVector(g, 0.5 * t ** 2);
+    return inVec;
   }
 
   clear() {

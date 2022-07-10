@@ -5247,6 +5247,11 @@
     "source-map" "~0.7.2"
     "source-map-support" "~0.5.19"
 
+"three.meshline@^1.4.0":
+  "integrity" "sha512-A8IsiMrWP8zmHisGDAJ76ZD7t/dOF/oCe/FUKNE6Bu01ZYEx8N6IlU/1Plb2aOZtAuWM2A8s8qS3hvY0OFuvOw=="
+  "resolved" "https://registry.npmjs.org/three.meshline/-/three.meshline-1.4.0.tgz"
+  "version" "1.4.0"
+
 "three@^0.139.2":
   "integrity" "sha512-gV7q7QY8rogu7HLFZR9cWnOQAUedUhu2WXAnpr2kdXZP9YDKsG/0ychwQvWkZN5PlNw9mv5MoCTin6zNTXoONg=="
   "resolved" "https://registry.npmjs.org/three/-/three-0.139.2.tgz"
