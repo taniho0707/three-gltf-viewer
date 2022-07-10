@@ -1,0 +1,25 @@
+[Unit]
+Description=docker-compose three-gltf-viewer service
+Requires=docker.service
+After=network.target
+
+[Service]
+User=docker
+Type=simple
+
+Environment=COMPOSE_FILE=/var/www/three-gltf-viewer/docker-compose.yml
+
+ExecStartPre=/usr/bin/docker-compose -f ${COMPOSE_FILE} rm -v -f
+ExecStartPre=/usr/bin/docker-compose -f ${COMPOSE_FILE} down
+
+ExecStart=/usr/bin/docker-compose -f ${COMPOSE_FILE} up --force-recreate --abort-on-container-exit
+
+ExecStop=/usr/bin/docker-compose -f ${COMPOSE_FILE} stop
+
+Restart=always
+RestartSec=180s
+
+WorkingDirectory=/var/www/three-gltf-viewer
+
+[Install]
+WantedBy=multi-user.target
